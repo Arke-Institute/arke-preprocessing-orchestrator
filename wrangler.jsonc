@@ -37,8 +37,8 @@
 
   // Environment variables (non-sensitive)
   "vars": {
-    "FLY_APP_NAME": "preprocess-orchestrator-arke-institute",
-    "FLY_WORKER_IMAGE": "registry.fly.io/preprocess-orchestrator-arke-institute:deployment-01K9G7720V6C7AY0VH2F8FBBG6",
+    "FLY_APP_NAME": "arke-tiff-worker",
+    "FLY_WORKER_IMAGE": "registry.fly.io/arke-tiff-worker:v1.0.0",
     "FLY_REGION": "ord",
     "ORCHESTRATOR_URL": "https://preprocessing-orchestrator.arke.institute",
     "WORKER_URL": "https://ingest.arke.institute",
@@ -46,6 +46,7 @@
     "BATCH_SIZE_TIFF_CONVERSION": "1000",
     "ALARM_DELAY_TIFF_CONVERSION": "5000",
     "ALARM_DELAY_ERROR_RETRY": "30000",
+    "TASK_TIMEOUT_TIFF_CONVERSION": "60000",
     "MAX_RETRY_ATTEMPTS": "5"
   },
 

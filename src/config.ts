@@ -23,6 +23,7 @@ export interface Env {
   BATCH_SIZE_TIFF_CONVERSION?: string;
   ALARM_DELAY_TIFF_CONVERSION?: string;
   ALARM_DELAY_ERROR_RETRY?: string;
+  TASK_TIMEOUT_TIFF_CONVERSION?: string;
   MAX_RETRY_ATTEMPTS?: string;
 
   // Durable Object
@@ -51,6 +52,9 @@ export function loadConfig(env: Env): Config {
     // Alarm delays
     ALARM_DELAY_TIFF_CONVERSION: parseInt(env.ALARM_DELAY_TIFF_CONVERSION || '5000'),
     ALARM_DELAY_ERROR_RETRY: parseInt(env.ALARM_DELAY_ERROR_RETRY || '30000'),
+
+    // Task timeouts (ms)
+    TASK_TIMEOUT_TIFF_CONVERSION: parseInt(env.TASK_TIMEOUT_TIFF_CONVERSION || '60000'), // 1 minute default
 
     // Retry limits
     MAX_RETRY_ATTEMPTS: parseInt(env.MAX_RETRY_ATTEMPTS || '5'),

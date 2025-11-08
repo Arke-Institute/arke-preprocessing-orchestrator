@@ -4,11 +4,11 @@
  */
 
 import type { Phase } from './base.js';
-import type { QueueMessage } from '../types/queue.js';
-import type { BatchState, BatchStatus, TiffConversionTask } from '../types/state.js';
+import type { BatchState, BatchStatus, TiffConversionTask, Task } from '../types/state.js';
 import type { Config } from '../types/config.js';
 import type { Env } from '../config.js';
 import type { TiffCallbackResult } from '../types/callback.js';
+import type { ProcessableFile } from '../types/file.js';
 import { generateTaskId } from '../utils/task-id.js';
 
 export class TiffConversionPhase implements Phase {
@@ -16,28 +16,26 @@ export class TiffConversionPhase implements Phase {
 
   /**
    * TIFF DISCOVERY
-   * Scan queue message for TIFF files
+   * Scan current file list for TIFF files
    */
-  async discover(queueMessage: QueueMessage): Promise<TiffConversionTask[]> {
+  async discover(files: ProcessableFile[]): Promise<TiffConversionTask[]> {
     const tasks: TiffConversionTask[] = [];
 
-    console.log(`[TiffConversion] Discovering TIFFs in batch ${queueMessage.batch_id}`);
+    console.log(`[TiffConversion] Discovering TIFFs in file list`);
 
-    for (const directory of queueMessage.directories) {
-      for (const file of directory.files) {
-        if (this.isTiff(file.file_name)) {
-          const task: TiffConversionTask = {
-            task_id: generateTaskId(queueMessage.batch_id, file.r2_key),
-            status: 'pending',
-            input_r2_key: file.r2_key,
-            input_file_name: file.file_name,
-            retry_count: 0,
-          };
+    for (const file of files) {
+      if (this.isTiff(file.file_name)) {
+        const task: TiffConversionTask = {
+          task_id: generateTaskId('tiff', file.r2_key),
+          status: 'pending',
+          input_r2_key: file.r2_key,
+          input_file_name: file.file_name,
+          retry_count: 0,
+        };
 
-          tasks.push(task);
+        tasks.push(task);
 
-          console.log(`[TiffConversion] Found TIFF: ${file.file_name} (${file.r2_key})`);
-        }
+        console.log(`[TiffConversion] Found TIFF: ${file.file_name} (${file.r2_key})`);
       }
     }
 
@@ -55,6 +53,9 @@ export class TiffConversionPhase implements Phase {
     config: Config,
     env: Env
   ): Promise<boolean> {
+    // Check for timed-out tasks
+    this.checkTimeouts(state, config.TASK_TIMEOUT_TIFF_CONVERSION);
+
     // Get pending tasks (up to batch size)
     const pendingTasks = Object.values(state.current_phase_tasks)
       .filter(t => t.status === 'pending')
@@ -151,7 +152,7 @@ export class TiffConversionPhase implements Phase {
       throw new Error(`Fly API error: ${response.status} ${errorText}`);
     }
 
-    const machine = await response.json();
+    const machine = await response.json() as { id: string };
     task.fly_machine_id = machine.id;
 
     console.log(`[TiffConversion] Spawned Fly machine ${machine.id} for task ${task.task_id}`);
@@ -193,6 +194,77 @@ export class TiffConversionPhase implements Phase {
    */
   getNextPhase(): BatchStatus | null {
     return null; // Goes to DONE
+  }
+
+  /**
+   * Transform file: preserve both TIFF and JPEG
+   */
+  transformFile(
+    file: ProcessableFile,
+    task: Task | undefined
+  ): ProcessableFile[] {
+    const tiffTask = task as TiffConversionTask | undefined;
+
+    if (
+      tiffTask &&
+      tiffTask.status === 'completed' &&
+      tiffTask.output_r2_key &&
+      tiffTask.output_file_name &&
+      tiffTask.output_file_size
+    ) {
+      // File was converted - return BOTH original TIFF and converted JPEG
+      return [
+        // 1. Original TIFF (preserved)
+        {
+          ...file,
+          preprocessor_tags: [...(file.preprocessor_tags || []), 'TiffConverter:source'],
+        },
+        // 2. Converted JPEG
+        {
+          r2_key: tiffTask.output_r2_key,
+          logical_path: file.logical_path.replace(/\.tiff?$/i, '.jpg'),
+          file_name: tiffTask.output_file_name,
+          file_size: tiffTask.output_file_size,
+          content_type: 'image/jpeg',
+          processing_config: file.processing_config,
+          source_file: file.file_name,
+          preprocessor_tags: ['TiffConverter'],
+        },
+      ];
+    } else {
+      // Not a TIFF or failed conversion - keep original file as-is
+      return [file];
+    }
+  }
+
+  /**
+   * Check for timed-out tasks and mark them as failed
+   */
+  private checkTimeouts(state: BatchState, timeoutMs: number): void {
+    const now = Date.now();
+    let timedOutCount = 0;
+
+    for (const task of Object.values(state.current_phase_tasks) as TiffConversionTask[]) {
+      if (task.status === 'processing' && task.started_at) {
+        const startedMs = new Date(task.started_at).getTime();
+        const elapsed = now - startedMs;
+
+        if (elapsed > timeoutMs) {
+          task.status = 'failed';
+          task.error = `Task timed out after ${Math.round(elapsed / 1000)}s (limit: ${Math.round(timeoutMs / 1000)}s)`;
+          state.tasks_failed++;
+          timedOutCount++;
+
+          console.error(
+            `[TiffConversion] ⏱ Task ${task.task_id} timed out after ${Math.round(elapsed / 1000)}s`
+          );
+        }
+      }
+    }
+
+    if (timedOutCount > 0) {
+      console.log(`[TiffConversion] Marked ${timedOutCount} task(s) as timed out`);
+    }
   }
 
   /**

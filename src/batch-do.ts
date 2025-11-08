@@ -4,7 +4,7 @@
  */
 
 import { DurableObject } from 'cloudflare:workers';
-import type { Env, loadConfig } from './config.js';
+import type { Env } from './config.js';
 import type { QueueMessage } from './types/queue.js';
 import type { BatchState, BatchStatus } from './types/state.js';
 import type { ProcessableFile } from './types/file.js';
@@ -32,9 +32,8 @@ export interface StatusResponse {
 /**
  * Preprocessing Durable Object
  */
-export class PreprocessingDurableObject extends DurableObject {
+export class PreprocessingDurableObject extends DurableObject<Env> {
   private state: BatchState | null = null;
-  private env: Env;
 
   // Phase registry
   private phases: Map<BatchStatus, Phase> = new Map([
@@ -44,7 +43,6 @@ export class PreprocessingDurableObject extends DurableObject {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.env = env;
   }
 
   /**
@@ -62,11 +60,29 @@ export class PreprocessingDurableObject extends DurableObject {
 
     console.log(`[DO] Starting batch ${queueMessage.batch_id}`);
 
+    // Convert queue message files to initial file list
+    const initialFiles: ProcessableFile[] = [];
+    for (const directory of queueMessage.directories) {
+      for (const file of directory.files) {
+        initialFiles.push({
+          r2_key: file.r2_key,
+          logical_path: file.logical_path,
+          file_name: file.file_name,
+          file_size: file.file_size,
+          content_type: file.content_type,
+          cid: file.cid,
+          processing_config: directory.processing_config,
+        });
+      }
+    }
+
+    console.log(`[DO] Initialized file list with ${initialFiles.length} files`);
+
     // Determine first phase
     const firstPhase = this.phases.get('TIFF_CONVERSION')!;
 
-    // Run discovery for first phase
-    const tasks = await firstPhase.discover(queueMessage);
+    // Run discovery for first phase from initial file list
+    const tasks = await firstPhase.discover(initialFiles);
 
     console.log(`[DO] Discovered ${tasks.length} task(s) for ${firstPhase.name} phase`);
 
@@ -75,6 +91,7 @@ export class PreprocessingDurableObject extends DurableObject {
       batch_id: queueMessage.batch_id,
       status: 'TIFF_CONVERSION',
       queue_message: queueMessage,
+      current_file_list: initialFiles,
       current_phase_tasks: Object.fromEntries(
         tasks.map(t => [t.task_id, t])
       ),
@@ -111,8 +128,8 @@ export class PreprocessingDurableObject extends DurableObject {
       return;
     }
 
-    // If in ERROR or COMPLETED state, clear alarm and exit
-    if (this.state.status === 'ERROR' || this.state.status === 'COMPLETED') {
+    // If in ERROR or DONE state, clear alarm and exit
+    if (this.state.status === 'ERROR' || this.state.status === 'DONE') {
       console.log(`[DO] Alarm fired in terminal state ${this.state.status}, clearing alarm`);
       await this.ctx.storage.deleteAlarm();
       return;
@@ -156,20 +173,54 @@ export class PreprocessingDurableObject extends DurableObject {
   }
 
   /**
+   * Apply phase transformations to current file list
+   * Builds the new file list after a phase completes
+   */
+  private applyPhaseTransformations(phase: Phase): ProcessableFile[] {
+    const files: ProcessableFile[] = [];
+
+    // Build task map for lookup by input file
+    const taskMap = new Map(
+      Object.values(this.state!.current_phase_tasks).map(t => [
+        (t as any).input_r2_key || (t as any).r2_key,
+        t
+      ])
+    );
+
+    console.log(`[DO] Applying ${phase.name} transformations to ${this.state!.current_file_list.length} files`);
+
+    // Apply transformations to each file in current list
+    for (const file of this.state!.current_file_list) {
+      const task = taskMap.get(file.r2_key);
+      const transformedFiles = phase.transformFile(file, task);
+      files.push(...transformedFiles);
+    }
+
+    console.log(`[DO] Transformation result: ${files.length} files`);
+
+    return files;
+  }
+
+  /**
    * Transition to next phase
    */
   private async transitionToNextPhase(completedPhase: Phase): Promise<void> {
+    // 1. Apply completed phase's transformations to build new file list
+    const transformedFiles = this.applyPhaseTransformations(completedPhase);
+    this.state!.current_file_list = transformedFiles;
+
+    // 2. Get next phase
     const nextStatus = completedPhase.getNextPhase();
 
     if (nextStatus === null) {
-      // No more phases - finalize batch
+      // No more phases - current_file_list is the final output
       console.log(`[DO] No more phases, finalizing batch`);
       await this.finalizeBatch();
     } else {
-      // Start next phase
+      // 3. Next phase discovers from transformed file list
       console.log(`[DO] Transitioning to ${nextStatus} phase`);
       const nextPhase = this.phases.get(nextStatus)!;
-      const tasks = await nextPhase.discover(this.state!.queue_message);
+      const tasks = await nextPhase.discover(transformedFiles);
 
       this.state!.status = nextStatus;
       this.state!.current_phase_tasks = Object.fromEntries(
@@ -237,8 +288,8 @@ export class PreprocessingDurableObject extends DurableObject {
     console.log(`[DO]   Completed: ${this.state!.tasks_completed}`);
     console.log(`[DO]   Failed: ${this.state!.tasks_failed}`);
 
-    // Build final file list
-    const processedFiles = this.buildProcessedFileList();
+    // Use current_file_list (already transformed by all phases)
+    const processedFiles = this.state!.current_file_list;
 
     console.log(`[DO] Sending ${processedFiles.length} file(s) to worker callback`);
 
@@ -268,54 +319,6 @@ export class PreprocessingDurableObject extends DurableObject {
       await this.ctx.storage.deleteAlarm();
       await this.saveState();
     }
-  }
-
-  /**
-   * Build processed file list for worker callback
-   * Preserves directory structure, replaces converted files
-   */
-  private buildProcessedFileList(): ProcessableFile[] {
-    const files: ProcessableFile[] = [];
-    const taskMap = new Map(
-      Object.values(this.state!.current_phase_tasks).map(t => [
-        (t as any).input_r2_key,
-        t
-      ])
-    );
-
-    // Preserve directory structure from original message
-    for (const directory of this.state!.queue_message.directories) {
-      for (const file of directory.files) {
-        const task = taskMap.get(file.r2_key) as any;
-
-        if (task && task.status === 'completed') {
-          // File was converted
-          files.push({
-            r2_key: task.output_r2_key,
-            logical_path: file.logical_path.replace(/\.tiff?$/i, '.jpg'),
-            file_name: task.output_file_name,
-            file_size: task.output_file_size,
-            content_type: 'image/jpeg',
-            processing_config: directory.processing_config,
-            source_file: file.file_name,
-            preprocessor_tags: ['TiffConverter'],
-          });
-        } else {
-          // Keep original file (not a TIFF or failed conversion)
-          files.push({
-            r2_key: file.r2_key,
-            logical_path: file.logical_path,
-            file_name: file.file_name,
-            file_size: file.file_size,
-            content_type: file.content_type,
-            cid: file.cid,
-            processing_config: directory.processing_config,
-          });
-        }
-      }
-    }
-
-    return files;
   }
 
   /**

@@ -21,6 +21,9 @@ export interface Config {
   ALARM_DELAY_TIFF_CONVERSION: number;
   ALARM_DELAY_ERROR_RETRY: number;
 
+  // Task timeouts (ms) - per phase
+  TASK_TIMEOUT_TIFF_CONVERSION: number;
+
   // Retry limits
   MAX_RETRY_ATTEMPTS: number;
 }

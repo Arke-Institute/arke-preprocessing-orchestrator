@@ -3,6 +3,7 @@
  */
 
 import type { QueueMessage } from './queue.js';
+import type { ProcessableFile } from './file.js';
 
 export type BatchStatus =
   | 'TIFF_CONVERSION'     // Converting TIFFs via Fly machines
@@ -47,8 +48,12 @@ export interface BatchState {
   batch_id: string;
   status: BatchStatus;
 
-  // Original queue message (preserved for final callback)
+  // Original queue message (preserved for reference)
   queue_message: QueueMessage;
+
+  // Current file list (updated after each phase completes)
+  // This is the evolving file list that phases build upon
+  current_file_list: ProcessableFile[];
 
   // Current phase tasks
   current_phase_tasks: Record<string, Task>;
