@@ -113,7 +113,7 @@ export class TiffConversionPhase implements Phase {
     const machineConfig = {
       name: `tiff-${task.task_id}`,
       config: {
-        image: config.FLY_WORKER_IMAGE,
+        image: config.FLY_TIFF_WORKER_IMAGE,
         env: {
           TASK_ID: task.task_id,
           BATCH_ID: state.batch_id,
@@ -136,7 +136,7 @@ export class TiffConversionPhase implements Phase {
     };
 
     const response = await fetch(
-      `https://api.machines.dev/v1/apps/${config.FLY_APP_NAME}/machines`,
+      `https://api.machines.dev/v1/apps/${config.FLY_TIFF_APP_NAME}/machines`,
       {
         method: 'POST',
         headers: {
@@ -189,11 +189,10 @@ export class TiffConversionPhase implements Phase {
   }
 
   /**
-   * After TIFF conversion, we're done (for now)
-   * Future: return next phase like 'PDF_SPLITTING'
+   * After TIFF conversion, proceed to image processing
    */
   getNextPhase(): BatchStatus | null {
-    return null; // Goes to DONE
+    return 'IMAGE_PROCESSING';
   }
 
   /**

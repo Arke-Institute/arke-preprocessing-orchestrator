@@ -7,6 +7,7 @@ import type { ProcessableFile } from './file.js';
 
 export type BatchStatus =
   | 'TIFF_CONVERSION'     // Converting TIFFs via Fly machines
+  | 'IMAGE_PROCESSING'    // Processing images (JPEG/PNG/WebP) for CDN
   | 'DONE'                // All processing complete
   | 'ERROR';              // Permanent failure
 
@@ -38,6 +39,37 @@ export interface TiffConversionTask extends Task {
 
   // Fly machine tracking
   fly_machine_id?: string;
+}
+
+/**
+ * Image processing task
+ */
+export interface ImageProcessingTask extends Task {
+  // Input file info
+  input_r2_key: string;
+  input_file_name: string;
+  input_content_type: string;
+  input_file_size: number;
+  input_cid?: string;  // Preserve original IPFS CID
+
+  // Output (from callback)
+  ref_json_r2_key?: string;  // Where .ref.json was written
+  ref_data?: RefData;        // The ref content
+  archive_r2_key?: string;   // Where original was archived
+
+  // Fly machine tracking
+  fly_machine_id?: string;
+}
+
+/**
+ * RefData structure for CDN references
+ */
+export interface RefData {
+  url: string;          // CDN URL (REQUIRED)
+  ipfs_cid?: string;    // Original IPFS CID
+  type?: string;        // MIME type
+  size?: number;        // File size in bytes
+  filename?: string;    // Original filename
 }
 
 /**

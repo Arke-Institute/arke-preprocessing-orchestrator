@@ -37,16 +37,24 @@
 
   // Environment variables (non-sensitive)
   "vars": {
-    "FLY_APP_NAME": "arke-tiff-worker",
-    "FLY_WORKER_IMAGE": "registry.fly.io/arke-tiff-worker:v1.0.0",
+    "FLY_TIFF_APP_NAME": "arke-tiff-worker",
+    "FLY_TIFF_WORKER_IMAGE": "registry.fly.io/arke-tiff-worker:v1.0.0",
+    "FLY_IMAGE_APP_NAME": "arke-image-processor",
+    "FLY_IMAGE_WORKER_IMAGE": "registry.fly.io/arke-image-processor:deployment-01K9H41G6JG7FMNK5Y8WCFPEK6",
     "FLY_REGION": "ord",
     "ORCHESTRATOR_URL": "https://preprocessing-orchestrator.arke.institute",
     "WORKER_URL": "https://ingest.arke.institute",
     "R2_BUCKET": "arke-staging",
+    "ARCHIVE_BUCKET": "arke-archive",
+    "CDN_PUBLIC_URL": "https://cdn.arke.institute",
+    "CDN_API_URL": "https://cdn.arke.institute",
     "BATCH_SIZE_TIFF_CONVERSION": "1000",
+    "BATCH_SIZE_IMAGE_PROCESSING": "1000",
     "ALARM_DELAY_TIFF_CONVERSION": "5000",
+    "ALARM_DELAY_IMAGE_PROCESSING": "5000",
     "ALARM_DELAY_ERROR_RETRY": "30000",
     "TASK_TIMEOUT_TIFF_CONVERSION": "60000",
+    "TASK_TIMEOUT_IMAGE_PROCESSING": "120000",
     "MAX_RETRY_ATTEMPTS": "5"
   },
 

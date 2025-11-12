@@ -11,6 +11,7 @@ import type { ProcessableFile } from './types/file.js';
 import type { Phase } from './phases/base.js';
 import { loadConfig as loadConfigImpl } from './config.js';
 import { TiffConversionPhase } from './phases/tiff-conversion.js';
+import { ImageProcessingPhase } from './phases/image-processing.js';
 
 /**
  * Status response for HTTP polling
@@ -36,9 +37,9 @@ export class PreprocessingDurableObject extends DurableObject<Env> {
   private state: BatchState | null = null;
 
   // Phase registry
-  private phases: Map<BatchStatus, Phase> = new Map([
+  private phases: Map<BatchStatus, Phase> = new Map<BatchStatus, Phase>([
     ['TIFF_CONVERSION', new TiffConversionPhase()],
-    // Future phases: ['PDF_SPLITTING', new PdfSplittingPhase()],
+    ['IMAGE_PROCESSING', new ImageProcessingPhase()],
   ]);
 
   constructor(ctx: DurableObjectState, env: Env) {
